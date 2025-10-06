@@ -43,22 +43,20 @@ class LLMConfig:
     enabled: bool = True
     token: str | None = None
     url: str = "https://genai.rcac.purdue.edu/api/chat/completions"
-    model: str = "qwen2.5:72b"
+    model: str = "gpt-oss:latest"
     batch_size: int = 25
     max_retries: int = 2
     concurrent_requests: int = 3
-    timeout_seconds: int = 90
+    timeout_seconds: int = 120
     prompt: str = _DEFAULT_PROMPT
 
     def __post_init__(self) -> None:
         if self.token is None:
-            self.token = os.getenv("LLM_TOKEN") or (
-                "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6ImY4MzllZTdmLWI0OTYtNGNlNC1hMTc1LWVmZDYyNmE3NWNmNSJ9.b3jV4lQvts9f0qBHFuHjZwBHiowCC-11jkhDbUKd0Lc"
-            )
+            self.token = os.getenv("LLM_TOKEN")
         if not self.url:
             self.url = os.getenv("LLM_URL", "https://genai.rcac.purdue.edu/api/chat/completions")
         if not self.model:
-            self.model = os.getenv("LLM_MODEL", "qwen2.5:72b")
+            self.model = os.getenv("LLM_MODEL", "gpt-oss:latest")
 
     def headers(self) -> dict[str, str]:
         headers = {"Content-Type": "application/json"}
@@ -104,6 +102,7 @@ def _ask_llm_batch_match(pairs_to_check: Sequence[Tuple[str, str]], config: LLMC
             }
         ],
         "stream": False,
+        "reasoning_effort": "low",
     }
 
     decisions = [False] * len(pairs_to_check)
