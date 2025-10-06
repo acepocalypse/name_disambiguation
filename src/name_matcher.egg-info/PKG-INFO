@@ -1,0 +1,204 @@
+Metadata-Version: 2.4
+Name: name-matcher
+Version: 0.1.0
+Summary: High-precision clustering for person name deduplication
+Author: Your Name
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+Requires-Dist: pandas
+Requires-Dist: numpy
+Requires-Dist: scikit-learn
+Requires-Dist: ftfy
+Requires-Dist: unidecode
+Requires-Dist: requests
+Requires-Dist: tqdm
+Provides-Extra: test
+Requires-Dist: pytest; extra == "test"
+
+# Name Matcher Library
+
+A modular Python library for deduplicating person names. It normalizes input names, generates similarity candidates using TF-IDF cosine similarity, applies heuristic merging rules, optionally escalates ambiguous pairs to an LLM, and produces canonical labels for each cluster.
+
+## Installation
+
+The library targets Python 3.10+. Install dependencies with pip:
+
+`ash
+pip install pandas numpy scikit-learn ftfy unidecode requests tqdm
+`
+
+Clone or copy the src/name_matcher package into your project, or install it as an editable dependency using a pyproject.toml file (see below).
+
+## Quick Start
+
+`python
+from name_matcher import NameMatcher, NameMatcherConfig
+import pandas as pd
+
+# Load a dataframe containing a column of raw names
+frame = pd.read_csv("Full List HP Awardees Summer25.csv", dtype=str)
+
+matcher = NameMatcher(NameMatcherConfig(name_column="name"))
+result = matcher.cluster(frame)
+
+# The enriched dataframe includes normalized names, cluster IDs, and canonical labels
+print(result.dataframe.head())
+print(result.stats)
+`
+
+## File-to-File Pipeline
+
+The helper match_file runs the full workflow and writes the annotated output:
+
+`python
+# Name Matcher
+
+Name Matcher is a small, modular Python library for clustering and deduplicating person names. It:
+
+- normalizes names (Unicode cleanup, honorifics, suffixes),
+- builds candidate pairs using simple blocking keys,
+- scores similarities using TF-IDF + cosine similarity, and
+- applies deterministic heuristics and optional LLM adjudication to form canonical clusters.
+
+## Requirements
+
+- Python 3.10+
+- pandas, numpy, scikit-learn
+- Optional: tqdm (progress bars), ftfy, unidecode, requests (for LLM)
+
+Install the package in editable mode for development (recommended):
+
+```powershell
+pip install -e .
+```
+
+Or install the main runtime dependencies directly:
+
+```powershell
+pip install pandas numpy scikit-learn
+```
+
+## Quick start (API)
+
+Use the library from Python or a Jupyter notebook to cluster names in-memory:
+
+```python
+import pandas as pd
+from name_matcher.pipeline import NameMatcher, NameMatcherConfig
+
+# sample dataframe
+df = pd.DataFrame({"name": ["John A. Smith", "J. Smith", "Mary Jones"]})
+
+config = NameMatcherConfig(name_column="name")
+matcher = NameMatcher(config)
+result = matcher.cluster(df)
+
+# enriched dataframe and run statistics
+print(result.dataframe.head())
+print(result.stats)
+`
+
+To enable LLM adjudication for ambiguous pairs, set `llm_token` in the config:
+
+`python
+config = NameMatcherConfig(name_column="name", llm_token="your_api_key")
+matcher = NameMatcher(config)
+result = matcher.cluster(df)
+`
+
+## File-to-File Pipeline
+```
+
+The returned object is a `NameMatcherResult` with:
+- `.dataframe`: the annotated pandas DataFrame (columns: original name, name_norm, cluster_id, cluster_label, ...),
+- `.cluster_map`: mapping from cluster root id to member indices, and
+- `.stats`: a `NameMatcherStats` dataclass with run metrics.
+
+## Command line usage
+
+The package provides a simple CLI entrypoint. From the project root or an environment where the package is installed:
+
+```powershell
+python -m name_matcher input.csv output.xlsx --name-column name
+```
+
+Key flags:
+
+- `--auto-no-prob` : similarity threshold used when ejecting outliers (default: 0.35)
+- `--disable-tqdm` : disable progress bars
+- `--llm` / `--llm-url` / `--llm-token` : enable and configure optional LLM adjudication
+
+## File-to-file helper
+
+There is a convenience function `match_file` that reads a CSV/XLSX, runs clustering, and writes results:
+
+```python
+from name_matcher.runner import match_file
+
+match_file("input.csv", "output.xlsx")
+```
+
+It accepts an optional `NameMatcherConfig` instance for advanced configuration.
+
+## Notebook usage
+
+This library is notebook-friendly. Example workflow inside a Jupyter notebook:
+
+1) Create or upload a CSV and open a new notebook in the same Python environment.
+
+2) Example cells:
+
+```python
+# Cell 1: imports
+import pandas as pd
+from name_matcher.pipeline import NameMatcher, NameMatcherConfig
+
+# Cell 2: load data
+# For CSV files:
+df = pd.read_csv("your_names.csv", dtype=str)
+# For Excel files:
+df = pd.read_excel("your_names.xlsx").astype(str)
+
+# Cell 3: configure and run
+config = NameMatcherConfig(name_column="name", use_tqdm=True)
+# Optional: enable LLM adjudication by providing your API key
+# config.llm_token = "your_llm_api_key_here"
+matcher = NameMatcher(config)
+result = matcher.cluster(df)
+
+# Cell 4: inspect results
+result.dataframe.head()
+result.stats
+
+# Cell 5: save annotated output
+result.dataframe.to_excel("annotated_names.xlsx", index=False)
+```
+
+Tip: if you prefer using the file-helper directly in a notebook:
+
+```python
+from name_matcher.runner import match_file
+match_file("your_names.csv", "annotated_names.xlsx")
+```
+
+If you'd like a ready-to-open notebook, create one with the code cells above. (If you want, I can generate a .ipynb file for you.)
+
+## Running tests
+
+Run the project's tests with pytest from the repository root:
+
+```powershell
+pytest -q
+```
+
+## Contributing
+
+Contributions are welcome. Recommended workflow:
+
+1. Create an issue describing the bug or feature.
+2. Open a topic branch, make focused changes and include tests.
+3. Run tests locally and submit a pull request.
+
+## License
+
+Add your preferred license text or a short notice here.
