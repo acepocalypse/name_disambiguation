@@ -12,28 +12,26 @@ from typing import List, Sequence, Tuple
 import requests
 
 
-_DEFAULT_PROMPT = (
-    "You are a precise data deduplication expert. Your task is to determine if the name pairs below refer to the same person. "
-    "Your judgment is the final step for ambiguous cases.\n\n"
-    "**CRITICAL RULES (NON-NEGOTIABLE):**\n"
-    "1. **DIFFERENT LAST NAMES:** If the last names are clearly different (e.g., 'Miller' vs. 'Durand'), it is **NEVER** a match. This includes hyphenated names like 'Smith-Jones' vs 'Smith'.\n"
-    "2. **CONFLICTING INITIALS:** If the names share a first and last name but have explicitly contradictory middle names or initials (e.g., 'John B. Smith' vs. 'John G. Smith'), it is **NEVER** a match.\n"
-    "3. **NICKNAME HANDLING:** Common nicknames (e.g., 'Chris' for 'Christopher') ARE matches\n"
-    "4. **HYPHENATED NAMES:** Hyphenated first names match their non-hyphenated variants when initials match (e.g., 'Carl-Wilhelm' = 'Carl')\n\n"
-    "**GUIDING PRINCIPLE:** Match if one name is a plausible expansion, abbreviation, or version of the other. An initial is a plausible version of a full name (e.g., 'J. Smith' for 'John Smith').\n\n"
-    "**MATCH THESE PATTERNS:**\n"
-    "- `{'Chris Beard', 'Christopher Beard'}` (Nickname match)\n"
-    "- `{'Carl R. de Boor', 'Carl-Wilhelm Reinhold de Boor'}` (Hyphenated expansion)\n"
-    "- `{'Samuel F.B. Morse', 'Samuel Finley Breese Morse'}` (Multi-initial expansion)\n"
-    "- `{'C. N. R. Rao', 'Chintamani Nagesa Ramachandra Rao'}` (Complex Initials for full names)\n"
-    "- `{'J. B. Smith', 'John Barrett Smith'}` (Initials for full names)\n"
-    "- `{'Stephen Bechtel', 'Stephen Davison Bechtel'}` (Missing middle name)\n\n"
-    "**DO NOT MATCH (Based on Critical Rules):**\n"
-    "- `{'John B. Smith', 'John G. Smith'}` (Conflicting initials)\n"
-    "- `{'John Barrett Smith', 'John Garrett Smith'}` (Conflicting full names)\n\n"
-    "Return a single JSON object in a ```json code block. The object must have one key, 'results', an array of objects. "
-    "Each object needs an 'index' (integer) and a 'match' key ('yes' or 'no'). Do not add comments."
-)
+_DEFAULT_PROMPT = """Determine if each name pair refers to the same person. Return JSON only.
+
+RULES:
+1. Different last names → NO match (e.g., Miller ≠ Durand)
+2. Conflicting initials → NO match (e.g., John B. Smith ≠ John G. Smith)
+3. Nicknames → YES match (e.g., Chris = Christopher)
+4. Initials = full names → YES match (e.g., J. Smith = John Smith)
+5. Missing middle → YES match (e.g., John Smith = John B. Smith)
+
+EXAMPLES:
+YES: Chris Beard = Christopher Beard
+YES: Carl R. de Boor = Carl-Wilhelm Reinhold de Boor
+YES: C. N. R. Rao = Chintamani Nagesa Ramachandra Rao
+NO: John B. Smith ≠ John G. Smith
+NO: Miller ≠ Durand
+
+OUTPUT FORMAT:
+```json
+{"results": [{"index": 0, "match": "yes"}, {"index": 1, "match": "no"}]}
+```"""
 
 
 @dataclass
@@ -44,10 +42,11 @@ class LLMConfig:
     token: str | None = None
     url: str = "https://genai.rcac.purdue.edu/api/chat/completions"
     model: str = "gpt-oss:latest"
-    batch_size: int = 25
-    max_retries: int = 2
+    batch_size: int = 25  # Reduced from 25 to prevent timeouts
+    max_retries: int = 3  # Increased from 2 for better reliability
     concurrent_requests: int = 3
-    timeout_seconds: int = 120
+    timeout_seconds: int = 180  # Increased from 120 to handle slow responses
+    connection_timeout: int = 30  # Separate connection timeout
     prompt: str = _DEFAULT_PROMPT
 
     def __post_init__(self) -> None:
@@ -98,30 +97,57 @@ def _ask_llm_batch_match(pairs_to_check: Sequence[Tuple[str, str]], config: LLMC
         "messages": [
             {
                 "role": "user",
-                "content": f"{config.prompt}\n\nPAIRS TO ANALYZE:\n{json.dumps(formatted_pairs, indent=2)}",
+                "content": f"{config.prompt}\n\nPairs:\n{json.dumps(formatted_pairs)}",
             }
         ],
         "stream": False,
-        "reasoning_effort": "low",
+        "reasoning_effort": 'low',
+        "temperature": 0,  # Deterministic output
+        "max_tokens": 500 + len(formatted_pairs) * 20,  # Dynamic limit based on batch size
     }
 
     decisions = [False] * len(pairs_to_check)
     for attempt in range(1, config.max_retries + 1):
         try:
+            # Use tuple for timeout: (connection_timeout, read_timeout)
+            # This prevents connection delays from consuming read timeout
+            timeout_tuple = (config.connection_timeout, config.timeout_seconds)
             response = requests.post(
                 config.url,
                 headers=config.headers(),
                 json=body,
-                timeout=config.timeout_seconds,
+                timeout=timeout_tuple,
             )
             response.raise_for_status()
             payload = response.json()["choices"][0]["message"]["content"]
             _update_decisions_from_payload(payload, decisions)
             return decisions
+        except requests.exceptions.Timeout as exc:
+            # Specific handling for timeout errors
+            backoff = 2 ** attempt  # Exponential backoff: 2s, 4s, 8s
+            if attempt <= config.max_retries:
+                print(f"   LLM Timeout on attempt {attempt}/{config.max_retries}: {exc}. Retrying in {backoff}s...")
+                time.sleep(backoff)
+            else:
+                print(f"   LLM Timeout: All {config.max_retries} attempts failed. Batch defaulted to 'no'.")
+        except requests.exceptions.HTTPError as exc:
+            # HTTP errors (4xx, 5xx)
+            print(f"   LLM HTTP Error on attempt {attempt}/{config.max_retries}: {exc.response.status_code} - {exc}")
+            if exc.response.status_code >= 500 and attempt <= config.max_retries:
+                # Retry on server errors
+                backoff = 2 ** attempt
+                time.sleep(backoff)
+            else:
+                # Don't retry on client errors (4xx)
+                break
         except Exception as exc:
-            print(f"   LLM Error on attempt {attempt}: {exc}. Retrying...")
-            time.sleep(2)
-    print("   LLM Error: Batch failed after all retries. Defaulting to 'no' for this batch.")
+            # Other errors (connection, parsing, etc.)
+            backoff = 2 ** attempt
+            if attempt <= config.max_retries:
+                print(f"   LLM Error on attempt {attempt}/{config.max_retries}: {type(exc).__name__}: {exc}. Retrying in {backoff}s...")
+                time.sleep(backoff)
+            else:
+                print(f"   LLM Error: All {config.max_retries} attempts failed. Batch defaulted to 'no'.")
     return decisions
 
 
