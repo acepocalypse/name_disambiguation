@@ -9,6 +9,7 @@ import time
 from dataclasses import dataclass
 from typing import List, Sequence, Tuple
 
+import ftfy
 import requests
 
 
@@ -87,8 +88,9 @@ def _ask_llm_batch_match(pairs_to_check: Sequence[Tuple[str, str]], config: LLMC
     if not pairs_to_check:
         return []
 
+    # Fix any encoding issues in the input names
     formatted_pairs = [
-        {"index": i, "name1": first, "name2": second}
+        {"index": i, "name1": ftfy.fix_text(first), "name2": ftfy.fix_text(second)}
         for i, (first, second) in enumerate(pairs_to_check)
     ]
 
@@ -152,9 +154,12 @@ def _ask_llm_batch_match(pairs_to_check: Sequence[Tuple[str, str]], config: LLMC
 
 
 def _update_decisions_from_payload(payload: str, decisions: List[bool]) -> None:
-    match = re.search(r"```json\s*(\{.*?\})\s*```", payload, re.DOTALL)
+    # Fix any text encoding issues in the payload
+    fixed_payload = ftfy.fix_text(payload)
+    
+    match = re.search(r"```json\s*(\{.*?\})\s*```", fixed_payload, re.DOTALL)
     if not match:
-        match = re.search(r"(\{.*?\})", payload, re.DOTALL)
+        match = re.search(r"(\{.*?\})", fixed_payload, re.DOTALL)
     if not match:
         return
 
