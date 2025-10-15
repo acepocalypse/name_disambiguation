@@ -45,7 +45,7 @@ class LLMConfig:
     model: str = "gpt-oss:latest"
     batch_size: int = 25  # Reduced from 25 to prevent timeouts
     max_retries: int = 3  # Increased from 2 for better reliability
-    concurrent_requests: int = 3
+    concurrent_requests: int = 5
     timeout_seconds: int = 180  # Increased from 120 to handle slow responses
     connection_timeout: int = 30  # Separate connection timeout
     prompt: str = _DEFAULT_PROMPT
